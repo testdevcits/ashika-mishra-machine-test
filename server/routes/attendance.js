@@ -1,5 +1,5 @@
 const express = require('express');
-const Attendance = require('../models/Attendance');
+const mockDB = require('../config/mockDB');
 const auth = require('../middleware/auth');
 
 const router = express.Router();
@@ -14,12 +14,11 @@ router.post('/login', auth, async (req, res) => {
     if (!employeeId) return res.status(400).json({ message: 'Employee ID is required' });
 
     const today = getToday();
+    const existing = mockDB.getTodayAttendance(employeeId, today);
+    if (existing?.loginTime) return res.status(400).json({ message: 'Already clocked in today' });
 
-    const existing = await Attendance.findOne({ employee: employeeId, date: today });
-    if (existing) return res.status(400).json({ message: 'Already clocked in today' });
-
-    const attendance = await Attendance.create({
-      employee: employeeId,
+    const attendance = mockDB.createAttendance({
+      employeeId,
       date: today,
       loginTime: new Date(),
     });
@@ -37,16 +36,12 @@ router.post('/logout', auth, async (req, res) => {
     if (!employeeId) return res.status(400).json({ message: 'Employee ID is required' });
 
     const today = getToday();
-
-    const attendance = await Attendance.findOne({ employee: employeeId, date: today });
+    const attendance = mockDB.getTodayAttendance(employeeId, today);
     if (!attendance) return res.status(404).json({ message: 'No clock-in record found for today' });
     if (attendance.logoutTime) return res.status(400).json({ message: 'Already clocked out today' });
 
-    attendance.logoutTime = new Date();
-    attendance.totalWorkedHours = attendance.calculateWorkedHours();
-    await attendance.save();
-
-    res.json(attendance);
+    const updated = mockDB.updateAttendance(attendance._id, { logoutTime: new Date() });
+    res.json(updated);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -59,18 +54,17 @@ router.post('/start-break', auth, async (req, res) => {
     if (!employeeId) return res.status(400).json({ message: 'Employee ID is required' });
 
     const today = getToday();
-
-    const attendance = await Attendance.findOne({ employee: employeeId, date: today });
+    const attendance = mockDB.getTodayAttendance(employeeId, today);
     if (!attendance) return res.status(404).json({ message: 'No clock-in record found for today' });
 
-    // Check if there's already an ongoing break
-    const ongoingBreak = attendance.breaks.find((b) => b.startTime && !b.endTime);
+    const ongoingBreak = attendance.breaks?.find((b) => b.startTime && !b.endTime);
     if (ongoingBreak) return res.status(400).json({ message: 'Break already in progress' });
 
+    if (!attendance.breaks) attendance.breaks = [];
     attendance.breaks.push({ startTime: new Date() });
-    await attendance.save();
+    const updated = mockDB.updateAttendance(attendance._id, { breaks: attendance.breaks });
 
-    res.json(attendance);
+    res.json(updated);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -83,17 +77,16 @@ router.post('/end-break', auth, async (req, res) => {
     if (!employeeId) return res.status(400).json({ message: 'Employee ID is required' });
 
     const today = getToday();
-
-    const attendance = await Attendance.findOne({ employee: employeeId, date: today });
+    const attendance = mockDB.getTodayAttendance(employeeId, today);
     if (!attendance) return res.status(404).json({ message: 'No clock-in record found for today' });
 
-    const ongoingBreak = attendance.breaks.find((b) => b.startTime && !b.endTime);
+    const ongoingBreak = attendance.breaks?.find((b) => b.startTime && !b.endTime);
     if (!ongoingBreak) return res.status(400).json({ message: 'No ongoing break found' });
 
     ongoingBreak.endTime = new Date();
-    await attendance.save();
+    const updated = mockDB.updateAttendance(attendance._id, { breaks: attendance.breaks });
 
-    res.json(attendance);
+    res.json(updated);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -105,10 +98,7 @@ router.get('/', auth, async (req, res) => {
     const { employeeId } = req.query;
     if (!employeeId) return res.status(400).json({ message: 'Employee ID is required' });
 
-    const records = await Attendance.find({ employee: employeeId })
-      .populate('employee', 'firstName lastName email')
-      .sort({ date: -1 });
-
+    const records = mockDB.getAttendance(employeeId);
     res.json(records);
   } catch (error) {
     res.status(500).json({ message: error.message });

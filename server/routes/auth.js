@@ -1,6 +1,7 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const bcrypt = require('bcryptjs');
+const mockDB = require('../config/mockDB');
 const auth = require('../middleware/auth');
 
 const router = express.Router();
@@ -14,13 +15,13 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'All fields are required' });
     }
 
-    const userExists = await User.findOne({ email });
+    const userExists = mockDB.findUser(email);
     if (userExists) {
       return res.status(400).json({ message: 'User already exists' });
     }
 
-    const user = new User({ firstName, lastName, email, password });
-    await user.save();
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = mockDB.createUser({ firstName, lastName, email, password: hashedPassword, role: 'admin' });
 
     const token = jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET, {
       expiresIn: '24h',
@@ -45,12 +46,12 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    const user = await User.findOne({ email });
+    const user = mockDB.findUser(email);
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    const isMatch = await user.matchPassword(password);
+    const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -69,11 +70,15 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Get Profile (Protected)
+
 router.get('/profile', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('-password');
-    res.json(user);
+    const user = mockDB.users.find(u => u._id === req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    const { password, ...userWithoutPassword } = user;
+    res.json(userWithoutPassword);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

@@ -1,5 +1,5 @@
 const express = require('express');
-const Employee = require('../models/Employee');
+const mockDB = require('../config/mockDB');
 const auth = require('../middleware/auth');
 
 const router = express.Router();
@@ -13,12 +13,10 @@ router.post('/', auth, async (req, res) => {
       return res.status(400).json({ message: 'All fields are required' });
     }
 
-    const exists = await Employee.findOne({ email });
+    const exists = mockDB.employees.some(e => e.email === email);
     if (exists) return res.status(400).json({ message: 'Employee with this email already exists' });
 
-    const employee = await Employee.create({ firstName, lastName, email, phone, department, position, dateOfJoining });
-    await employee.populate('department', 'name');
-
+    const employee = mockDB.createEmployee({ firstName, lastName, email, phone, department, position, dateOfJoining });
     res.status(201).json(employee);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -28,24 +26,21 @@ router.post('/', auth, async (req, res) => {
 // Get all employees — with search and filter
 router.get('/', auth, async (req, res) => {
   try {
-    const { search, department, position } = req.query;
+    const { search, department } = req.query;
 
-    const query = {};
+    let employees = [...mockDB.employees];
 
     if (search) {
-      query.$or = [
-        { firstName: { $regex: search, $options: 'i' } },
-        { lastName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-      ];
+      employees = employees.filter(e =>
+        e.firstName.toLowerCase().includes(search.toLowerCase()) ||
+        e.lastName.toLowerCase().includes(search.toLowerCase()) ||
+        e.email.toLowerCase().includes(search.toLowerCase())
+      );
     }
 
-    if (department) query.department = department;
-    if (position) query.position = { $regex: position, $options: 'i' };
-
-    const employees = await Employee.find(query)
-      .populate('department', 'name')
-      .sort({ createdAt: -1 });
+    if (department) {
+      employees = employees.filter(e => e.department === department);
+    }
 
     res.json(employees);
   } catch (error) {
@@ -56,7 +51,7 @@ router.get('/', auth, async (req, res) => {
 // Get single employee
 router.get('/:id', auth, async (req, res) => {
   try {
-    const employee = await Employee.findById(req.params.id).populate('department', 'name');
+    const employee = mockDB.employees.find(e => e._id === req.params.id);
     if (!employee) return res.status(404).json({ message: 'Employee not found' });
     res.json(employee);
   } catch (error) {
@@ -67,13 +62,8 @@ router.get('/:id', auth, async (req, res) => {
 // Update employee
 router.put('/:id', auth, async (req, res) => {
   try {
-    const employee = await Employee.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    }).populate('department', 'name');
-
+    const employee = mockDB.updateEmployee(req.params.id, req.body);
     if (!employee) return res.status(404).json({ message: 'Employee not found' });
-
     res.json(employee);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -83,8 +73,9 @@ router.put('/:id', auth, async (req, res) => {
 // Delete employee
 router.delete('/:id', auth, async (req, res) => {
   try {
-    const employee = await Employee.findByIdAndDelete(req.params.id);
+    const employee = mockDB.employees.find(e => e._id === req.params.id);
     if (!employee) return res.status(404).json({ message: 'Employee not found' });
+    mockDB.deleteEmployee(req.params.id);
     res.json({ message: 'Employee deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
